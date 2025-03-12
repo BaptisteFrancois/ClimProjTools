@@ -6,12 +6,13 @@ import cdsapi
 import pandas as pd
 import geopandas as gpd
 
-def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980, 2101), 
+def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 2101), 
                             future_experiments=None, temporal_resolution='monthly', 
-                            list_of_months=None, output_dir=None):
+                            list_of_months=None, output_dir=None, overwrite=False):
     
     """ Download CMIP6 data from the Copernicus Data Store (CDS) using the cdsapi package."
-    
+        https://cds.climate.copernicus.eu/#!/home
+
         Parameters:
         -----------
         
@@ -75,14 +76,13 @@ def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980
         raise ImportError('Please install the cdsapi package by running "pip install cdsapi"')
     
     # Check if the API key is valid
-    c = cdsapi.Client()
     try: 
-        c.list_products()
+        c = cdsapi.Client()
     except Exception as e:
         raise ValueError(f'Error: {e}')
 
     
-    if GCMs == None:
+    if GCMs is None:
     
         # Default list of GCMs that will be downloaded
         models = ('access_cm2', 'access_esm1_5', 'awi_cm_1_1_mr', 'awi_esm_1_1_lr', 'bcc_csm2_mr',
@@ -96,7 +96,7 @@ def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980
             'mpi_esm1_1_2_ham', 'mpi_esm1_2_hr', 'mpi_esm1_2_lr', 'mri_esm2_0', 'nesm3', 'norcpm1', 
             'noresm2_lm', 'noresm2_mm', 'sam0_unicon', 'taiesm1', 'ukesm1_0_ll')
         
-    if variables == None:
+    if variables is None:
         
         # Default list of variables that will be downloaded
         variables = (
@@ -105,7 +105,7 @@ def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980
         )
 
     # Define the domain over which to download the data
-    if domain == None:
+    if domain is None:
         latN, lonW, latS, lonE = [90, -180, -90, 180] # Global domain
         Warning('No domain was specified. Downloading data for the global domain')
 
@@ -147,11 +147,11 @@ def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980
     
     # Define the months to download the data for
     if list_of_months is None:
-        months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+        months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
     else:
         months = [str(i) for i in list_of_months]
 
-    if output_dir == None:
+    if output_dir is None:
         raise ValueError('Please provide an output directory to save the downloaded files')
 
 
@@ -159,13 +159,22 @@ def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980
     list_failed_requests = pd.DataFrame(
         columns=['temporal_resolution', 'experiment', 'variable', 'model'])
     for model, variable, exp in product(models, variables, experiment):
-               
+
+        short_name, long_name = variable     
+        
+
+        if overwrite is False:
+            expected_output = f'{output_dir}/CMIP6/{short_name}/{exp}/{model}_{short_name}.zip'
+            if os.path.exists(expected_output):
+                print(f'The file {expected_output} already exists. Skipping...')
+                continue
+        
         # Create directories to save the downloaded files
-        full_output_dir = f'{output_dir}/CMIP6/{short_var}/{exp}/'
+        full_output_dir = f'{output_dir}/CMIP6/{short_name}/{exp}/'
         if not os.path.exists(full_output_dir):
             os.makedirs(full_output_dir)
 
-        short_var, long_var = variable
+        
         dataset = 'projections-cmip6'
 
         # Create the vector of years to download the data for
@@ -184,7 +193,7 @@ def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980
         request = {                
             'temporal_resolution': temporal_resolution,
             'experiment': exp,
-            'variable': long_var,
+            'variable': long_name,
             'model': model,
             'year': years,
             'month': months,
@@ -192,20 +201,22 @@ def download_CMIP6_from_CDS(GCMs=None, variables=None, domain=None, period=(1980
             'format': 'zip'
         }
 
+        #print(request)
+        
         try:
             client = cdsapi.Client()
-            client.retrieve(dataset, request, f'{full_output_dir}/{model}_{short_var}.zip')
+            client.retrieve(dataset, request, f'{full_output_dir}/{model}_{short_name}.zip')
         except Exception as e:
             print(f'Error: {e}')
             list_failed_requests._append(
                 {'temporal_resolution': temporal_resolution,
                  'experiment': exp,
-                 'variable': short_var,
+                 'variable': short_name,
                  'model': model}, 
                  ignore_index=True)
             continue
         else:
-            print(f'Data for {model} and {short_var} was downloaded successfully')
+            print(f'Data for {model} and {short_name} was downloaded successfully')
 
         del client
 
