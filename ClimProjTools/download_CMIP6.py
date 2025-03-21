@@ -7,8 +7,9 @@ import pandas as pd
 import geopandas as gpd
 
 def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 2101), 
-                            future_experiments=None, temporal_resolution='monthly', 
-                            list_of_months=None, output_dir=None, overwrite=False):
+                            future_experiments=None, temporal_resolution='monthly', pad_lat=0.5, 
+                            pad_lon=0.5, list_of_months=None, output_dir=None, overwrite=False,
+                            print_requests=False):
     
     """ Download CMIP6 data from the Copernicus Data Store (CDS) using the cdsapi package."
         https://cds.climate.copernicus.eu/#!/home
@@ -35,8 +36,8 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
             If None, the global domain will be used.
 
                 
-        future_experiments : str or list of str
-            Experiment to download the data for.  If a list of experiments is provided, the data for all 
+        future_experiments : list of str
+            Experiments to download the data for.  If a list of experiments is provided, the data for all 
             experiments will be downloaded.
             Acceptable values are: ['ssp1_1_9', 'ssp1_2_6', 'ssp2_4_5', 'ssp3_7_0', 'ssp4_3_4', 
                                    'ssp4_6_0', 'ssp5_8_5',  'ssp5_3_4os', 'ssp5_8_5']
@@ -51,6 +52,12 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
 
             Note: Currently, 'monthly' is the only temporal resolution that is supported.
 
+        pad_lat : float
+            Latitude padding to add to the domain. Default is 0.5.
+
+        pad_lon : float
+            Longitude padding to add to the domain. Default is 0.5.
+
         list_of_months : list (Optional)
             List of months to download the data for. Default is None, in which case the data for all 
             months will be downloaded.
@@ -58,6 +65,13 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
         output_dir : str
             Directory where the downloaded files will be saved. If None, an error will be raised 
             prompting the user to provide an output directory.
+
+        overwrite : bool
+            If True, the script will overwrite the files that already exist in the output directory.
+            If False, the script will skip the download of the files that already exist in the output
+
+        print_requests : bool
+            If True, the script will print the request that is sent to the CDS API. Default is False.
 
 
     """
@@ -75,13 +89,12 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
     except ImportError:
         raise ImportError('Please install the cdsapi package by running "pip install cdsapi"')
     
-    # Check if the API key is valid
-    try: 
-        c = cdsapi.Client()
-    except Exception as e:
-        raise ValueError(f'Error: {e}')
+    # Check if the list of experiments is provided as a list (if not None)
+    if future_experiments is not None:
+        if type(future_experiments) != list:
+            raise ValueError('The future_experiments parameter must be a list')
 
-    
+        
     if GCMs is None:
     
         # Default list of GCMs that will be downloaded
@@ -116,7 +129,7 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
             latN, lonW, latS, lonE = domain
                 
     elif type(domain) == gpd.geodataframe.GeoDataFrame:
-        latN, lonW, latS, lonE = domain.total_bounds.tolist()
+        lonW, latS, lonE, latN = domain.total_bounds.tolist()
 
     else:
         raise ValueError('The domain should be a list, tuple or GeoDataFrame')
@@ -126,21 +139,21 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
     if start_year > end_year:
         raise ValueError('The start year should be smaller than the end year')
     
-    if end_year > 2015 and future_experiments == None:
+    if end_year > 2015 and future_experiments is None:
         raise ValueError('Please provide at least one future experiment to download the data for')
     
     if end_year < 2015:
-        experiment = 'historical'
+        experiments = 'historical'
 
     if end_year > 2100:
         end_year = 2100
         raise Warning('The end year was set to 2100')
         
     if start_year >= 2015:
-        experiment = future_experiments
+        experiments = future_experiments
 
     if start_year < 2015 and end_year >= 2015:
-        experiment = ['historical', future_experiments]
+        experiments = ['historical', *future_experiments]
 
     if temporal_resolution != 'monthly':
         raise ValueError('Currently, only the monthly temporal resolution is supported')
@@ -158,19 +171,19 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
     # Download the data
     list_failed_requests = pd.DataFrame(
         columns=['temporal_resolution', 'experiment', 'variable', 'model'])
-    for model, variable, exp in product(models, variables, experiment):
+    for model, variable, exp in product(models, variables, experiments):
 
         short_name, long_name = variable     
         
 
         if overwrite is False:
-            expected_output = f'{output_dir}/CMIP6/{short_name}/{exp}/{model}_{short_name}.zip'
+            expected_output = f'{output_dir}/{short_name}/{exp}/{model}_{short_name}.zip'
             if os.path.exists(expected_output):
                 print(f'The file {expected_output} already exists. Skipping...')
                 continue
         
         # Create directories to save the downloaded files
-        full_output_dir = f'{output_dir}/CMIP6/{short_name}/{exp}/'
+        full_output_dir = f'{output_dir}/{short_name}/{exp}/'
         if not os.path.exists(full_output_dir):
             os.makedirs(full_output_dir)
 
@@ -197,11 +210,12 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
             'model': model,
             'year': years,
             'month': months,
-            'area': [latN, lonW, latS, lonE],
+            'area': [latN+pad_lat, lonW-pad_lon, latS-pad_lat, lonE+pad_lon],
             'format': 'zip'
         }
 
-        #print(request)
+        if print_requests:
+            print(request)
         
         try:
             client = cdsapi.Client()
@@ -222,4 +236,19 @@ def from_ClimateDataStore(GCMs=None, variables=None, domain=None, period=(1980, 
 
     print('All data was downloaded successfully')
 
-    list_failed_requests.to_csv(f'{output_dir}/CMIP6/failed_requests.csv', index=False)
+    list_failed_requests.to_csv(f'{output_dir}/failed_requests.csv', index=False)
+
+
+if __name__ == '__main__':
+
+    from_ClimateDataStore(
+        GCMs=None, 
+        variables=None, 
+        domain=None, 
+        period=(1980, 2101), 
+        future_experiments=None, 
+        temporal_resolution='monthly', 
+        list_of_months=None, 
+        output_dir=None, 
+        overwrite=False,
+        print_requests=False)
