@@ -677,10 +677,7 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
         else:
             plt.suptitle(f'CMIP6 models ({future_exp})', fontsize=16)
 
-        for k, period in enumerate(delta.columns):
-            ax2.hist(delta[period].values.flatten(), bins=bins_P, color=colors[k], edgecolor='k',
-
-
+        
         plt.tight_layout()
         
         if path_figure is not None:
