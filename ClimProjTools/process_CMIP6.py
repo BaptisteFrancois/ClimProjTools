@@ -621,6 +621,7 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
 
     elif with_gcm_distribution_on_the_side == True:
 
+
         if xlim is None or ylim is None:
             raise ValueError('You must provide the x and y limits to plot the GCM distribution on the'
             'side')
@@ -675,6 +676,10 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
             plt.suptitle(figure_title, fontsize=16)
         else:
             plt.suptitle(f'CMIP6 models ({future_exp})', fontsize=16)
+
+        for k, period in enumerate(delta.columns):
+            ax2.hist(delta[period].values.flatten(), bins=bins_P, color=colors[k], edgecolor='k',
+
 
         plt.tight_layout()
         
