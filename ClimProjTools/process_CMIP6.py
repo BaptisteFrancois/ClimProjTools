@@ -185,7 +185,7 @@ def extract_basin_average_from_CMIP6_data(variables, experiments, basin_shapefil
                 weights = pd.DataFrame(columns=['lat', 'lon', 'weight'])
                 for k, grid in enumerate(grid_cells.geometry):
 
-                    grid = gpd.GeoDataFrame({'geometry': [grid]}, epsg=epsg)
+                    grid = gpd.GeoDataFrame({'geometry': [grid]}, crs=epsg)
                     
                     intersections = gpd.overlay(grid, basin, how='intersection')
 
