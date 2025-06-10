@@ -22,7 +22,9 @@ setup(
         'geopandas',
         'cdsapi',
         'xarray',
-        'shapely'
+        'shapely',
+        'rasterio',
+        'netCDF4'
     ],
-    keywords=['python', 'Climate Change', 'CMIP6', 'CDS'],
+    keywords=['python', 'CMIP6', 'Weather and Climate Data', 'Climate Projections'],
 )
