@@ -95,7 +95,7 @@ def extract_livneh_lusu_data(basins_list,
             intersecting_cells['fraction_overlap'] / intersecting_cells['fraction_overlap'].sum()
 
         # Re-project the basin geometry to match the grid cells
-        intersecting_cells = intersecting_cells.to_crs(basin_shapefile.crs)
+        intersecting_cells = intersecting_cells.to_crs(basins_list.crs)
 
         # Check if the an output file already exists for the basin
         if not overwrite_existing:
