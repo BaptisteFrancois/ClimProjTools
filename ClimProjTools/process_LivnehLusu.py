@@ -29,13 +29,14 @@ def extract_livneh_lusu_data(basins_list,
                              tmp_work_dir='../temporary_working_dir/',
                              plot_grid_cells=True
                              ):
+    
     """
     Extracts Livneh-Lusu data for a given basin and saves it to a CSV file.
 
     To extract the Livneh-Lusu data, you need to have the netCDF files available in the specified directory.
     The data can be downloaded from the Livneh-Lusu dataset from: https://cirrus.ucsd.edu/~pierce/nonsplit_precip/
 
-    
+
     Parameters:
     - basins_list: GeoDataFrame containing the basin for which to extract data.
     - years_start_end: Tuple containing the start and end years for the extraction (e.g., (1950, 2018)).
@@ -48,10 +49,10 @@ def extract_livneh_lusu_data(basins_list,
     - plot_grid_cells: If True, plot the grid cells that fall within each basin. By default, the figures
     are saved in the `output_dir/figures` directory.
     """
-    
+
     # Create the list of years to extract data for
     years = np.arange(years_start_end[0], years_start_end[1] + 1)
-    
+
     # Open one of the Livneh-Lusu netCDF files to get grid
     nc = Dataset(
         livneh_lusu_dir + livneh_lusu_temp_file_template.format(years[0]), 'r')
@@ -70,33 +71,7 @@ def extract_livneh_lusu_data(basins_list,
         for lon, lat in zip(lon_grid.ravel(), lat_grid.ravel())]
     grid_cells = grid_cells.set_geometry('geometry')
     grid_cells.crs = 'EPSG:4326'  # Set the CRS to WGS84
-
-    # Convert the `grid_cells` GeoDataFrame to a raster format
-    grid_cells_raster = rasterize(
-        grid_cells.geometry,
-        out_shape=(len(latitudes), len(longitudes)),
-        transform=from_origin(lon_grid.min(), lat_grid.max(), lon_res, lat_res),
-        fill=0,
-        dtype=np.float32
-    )
-
-    # Save into a raster file. This raster will be used to mask the grid cells that fall within each basin.
-    if not os.path.exists(tmp_work_dir):
-        os.makedirs(tmp_work_dir)
-
-    with rasterio.open(
-        os.path.join(tmp_work_dir, 'Livneh_Lusu_grid_cells_EPSG4326.tif'),
-        'w',
-        driver='GTiff',
-        height=grid_cells_raster.shape[0],
-        width=grid_cells_raster.shape[1],
-        count=1,
-        dtype=grid_cells_raster.dtype,
-        crs='EPSG:4326',
-        transform=from_origin(lon_grid.min()-lon_res/2, lat_grid.max()+lon_res/2, lon_res, lat_res)
-    ) as dst:
-        dst.write(grid_cells_raster, 1)
-
+    grid_cells_meters = grid_cells.to_crs(epsg=3857)  # Convert to Web Mercator for rasterization
 
 
     # Loop over the basins
@@ -105,37 +80,29 @@ def extract_livneh_lusu_data(basins_list,
         # Get the basin ID and ensure it is zero-padded to 8 digits
         basin_id = str(basin['hru_id']).zfill(8)  # Ensure the basin ID is zero-padded to 8 digits
 
+        watershed = gpd.GeoDataFrame({'id':[basin_id]}, 
+                                    geometry=[basin['geometry']], 
+                                    crs=basins_list.crs)
+        watershed_meters = watershed.to_crs(epsg=3857)  # Convert to Web Mercator for rasterization
+        intersecting_cells = grid_cells_meters[grid_cells_meters.intersects(watershed_meters.union_all())]
+
+        intersecting_cells = intersecting_cells.copy()
+        intersecting_cells["intersection_area"] = \
+            intersecting_cells.geometry.intersection(watershed_meters.union_all()).area
+        intersecting_cells["fraction_overlap"] = \
+            intersecting_cells["intersection_area"] / intersecting_cells.area
+        intersecting_cells['weights'] = \
+            intersecting_cells['fraction_overlap'] / intersecting_cells['fraction_overlap'].sum()
+
+        # Re-project the basin geometry to match the grid cells
+        intersecting_cells = intersecting_cells.to_crs(basin_shapefile.crs)
+
         # Check if the an output file already exists for the basin
         if not overwrite_existing:
             if os.path.exists(os.path.join(output_dir, f'livneh_lusu_basin_{basin_id}.csv')):
                 print(f'Skipping basin {basin_id} as output file already exists.')
                 continue
         
-        # Create a mask for the basin
-        with rasterio.open(os.path.join(tmp_work_dir, 'Livneh_Lusu_grid_cells_EPSG4326.tif')) as src:
-            
-            # Get the basin geometry in GeoJSON format
-            shapes = [feature.__geo_interface__ for feature in [basin.geometry]]
-            
-            # Mask the grid cells raster with the basin geometry.
-            # `out_image` will contain the masked grid cells, and `out_transform` 
-            #  will contain the transform for the masked raster.
-            out_image, out_transform = mask(src, shapes)#, crop=True)
-            
-        # Identify the grid cells from lon_grid and lat_grid that fall within the basin 
-        # (i.e. , where the mask is not zero)
-        basin_mask = out_image[0] > 0  # Assuming the first band contains the mask
-        
-        # Get the indices of the axes of the `out_image` array
-        rows, cols = np.indices((out_image[0].shape[0], out_image[0].shape[1]))
-        # xs and ys are the coordinates of the grid cells in the masked raster
-        xs, ys = rasterio.transform.xy(out_transform, rows, cols, offset='center')
-        xs = np.array(xs)
-        ys = np.array(ys)
-        
-        # Get the longitude and latitude of the grid cells that fall within the basin
-        lon_basin_masked = xs.flatten()[basin_mask.flatten()]
-        lat_basin_masked = ys.flatten()[basin_mask.flatten()]
             
         # Plot the basin geometry and the grid cells that fall within the basin
         if plot_grid_cells:
@@ -144,11 +111,12 @@ def extract_livneh_lusu_data(basins_list,
                 os.makedirs(output_dir_figures)
 
             fig, ax = plt.subplots(1,1, figsize=(10, 10))
-            plt.scatter(lon_basin_masked, lat_basin_masked, c='red', s=3, label='Grid cells within basin')
+            plt.scatter(intersecting_cells['lon'], intersecting_cells['lat'], c='red', s=3, label='Grid cells within basin')
+            intersecting_cells['geometry'].plot(ax=ax, edgecolor='grey', alpha=0.5, markersize=3)
             gpd.GeoSeries(basin.geometry).plot(color='blue', alpha=0.5, label='Basin boundary', ax=ax)
             plt.xlabel('Longitude')
             plt.ylabel('Latitude')
-            plt.title(f'Grid cells within basin {basin_id} ({basin.AREA/10**6:.1f} km² - {len(lon_basin_masked)} grid cells)')
+            plt.title(f'Grid cells within basin {basin_id} ({basin.AREA/10**6:.1f} km² - {intersecting_cells.shape[0]} grid cells)')
             plt.legend()
             fig.tight_layout()
             fig.savefig(os.path.join(output_dir_figures, f'livneh_lusu_basin_{basin_id}_grid_cells.png'))
@@ -156,9 +124,8 @@ def extract_livneh_lusu_data(basins_list,
             #plt.show()
 
         # Get the indices of the grid cells that fall within the basin
-        x_cell_indices = np.searchsorted(longitudes, lon_basin_masked)
-        y_cell_indices = np.searchsorted(latitudes, lat_basin_masked)
-
+        x_cell_indices = np.searchsorted(longitudes, intersecting_cells['lon'])
+        y_cell_indices = np.searchsorted(latitudes, intersecting_cells['lat'])
         
         # Extract the Livneh-Lusu data for the grid cells that fall within the basin
         
@@ -168,6 +135,9 @@ def extract_livneh_lusu_data(basins_list,
 
         # Loop over the years and extract the data for the grid cells
         for year in years:
+
+            # Repeat the weight for each time step
+            intersecting_cells['weights'] = intersecting_cells['weights'].values[:, np.newaxis]
             
             # Open the netCDF files for the year
             nc_temp = Dataset(
@@ -191,14 +161,33 @@ def extract_livneh_lusu_data(basins_list,
                 raise ValueError(f'Time indices do not match for year {year} in basin {basin_id}')
             
             # Extract the temperature and wind data for the grid cells that fall within the basin and 
-            # calculate the basin average
-            tmax = nc_temp.variables['Tmax'][:, y_cell_indices, x_cell_indices].mean(axis=(1, 2))
-            tmin = nc_temp.variables['Tmin'][:, y_cell_indices, x_cell_indices].mean(axis=(1, 2))
-            wind = nc_temp.variables['Wind'][:, y_cell_indices, x_cell_indices].mean(axis=(1, 2))
-            # Extract the precipitation data for the grid cells that fall within the basin
-            prcp = nc_precip.variables['PRCP'][:, y_cell_indices, x_cell_indices].mean(axis=(1, 2))
+            # calculate the basin average. The value from the grid cell is multiplied by the fraction of
+            # the grid cell that falls within the basin.
+            tmax_ = []
+            tmin_ = []
+            wind_ = []
+            prcp_ = []
+            area_discounted = 0
+            for i, (x, y) in enumerate(zip(x_cell_indices, y_cell_indices)):
+                if nc_temp.variables['Tmax'][:, y, x].mask.all():
+                    # The overlapping grid cell is completely masked. We skip it and will discount its 
+                    # contribution to the basin average.
+                    # This typically happens when overlapping grid cells are located outside the domain
+                    # of the Livneh-Lusu dataset (e.g. in Canada).          
+                    area_discounted+= intersecting_cells['fraction_overlap'].values[i]
+                else:           
+                    tmax_.append(nc_temp.variables['Tmax'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
+                    tmin_.append(nc_temp.variables['Tmin'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
+                    wind_.append(nc_temp.variables['Wind'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
+                    prcp_.append(nc_precip.variables['PRCP'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
 
-
+            
+            tmax = np.array(tmax_).sum(axis=0) / (intersecting_cells['fraction_overlap'].values.sum() - area_discounted)
+            tmin = np.array(tmin_).sum(axis=0) / (intersecting_cells['fraction_overlap'].values.sum() - area_discounted)
+            wind = np.array(wind_).sum(axis=0) / (intersecting_cells['fraction_overlap'].values.sum() - area_discounted)
+            prcp = np.array(prcp_).sum(axis=0) / (intersecting_cells['fraction_overlap'].values.sum() - area_discounted)
+            
+            
             # Create a DataFrame for the data for the year
             df_year = pd.DataFrame({
                 'tmax_C': tmax.flatten(),
@@ -217,6 +206,7 @@ def extract_livneh_lusu_data(basins_list,
         # Save the basin data to a CSV file
         output_file = os.path.join(output_dir, f'livneh_lusu_basin_{basin_id}.csv')
         df_basin.to_csv(output_file, index_label='date')
+
 
 if __name__ == '__main__':
 

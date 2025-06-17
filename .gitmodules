@@ -1,0 +1,3 @@
+[submodule "ClimProjTools/dem_getter"]
+	path = ClimProjTools/dem_getter
+	url = https://code.usgs.gov/gecsc/dem_getter.git

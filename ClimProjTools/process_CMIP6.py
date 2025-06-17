@@ -693,7 +693,7 @@ if '__main__' == __name__:
     # Extract basin average for each variable and experiment
     extract_basin_average_from_CMIP6_data(
         variables=['tas', 'prcp'], experiments=['historical', 'ssp5_8_5'], 
-        basin_shapefile='../data/shapefiles/cuencas_completas.shp',
+        basin_shapefile='../data/shapefiles/Orinoquia/cuencas_completas.shp',
         epsg=2317, # EPSG 2317 is a good projection to calculate areas for the Orinoco River basin (Colombia)
         gcm_directory='../data/CMIP6/CMIP6_zip/', 
         output_directory='../data/CMIP6/processed/')
