@@ -26,7 +26,6 @@ def extract_livneh_lusu_data(basins_list,
                              livneh_lusu_temp_file_template='livneh_lusu_2020_temp_and_wind.2021-05-02.{}.nc',
                              livneh_lusu_prcp_file_template='livneh_unsplit_precip.2021-05-02.{}.nc',
                              overwrite_existing=False,
-                             tmp_work_dir='../temporary_working_dir/',
                              plot_grid_cells=True
                              ):
     
@@ -45,7 +44,6 @@ def extract_livneh_lusu_data(basins_list,
     - livneh_lusu_temp_file_template: Template for the Livneh-Lusu Temperature netCDF file names.
     - livneh_lusu_prcp_file_template: Template for the Livneh-Lusu precipitation netCDF file names.
     - overwrite_existing: If True, overwrite existing output files.
-    - tmp_work_dir: Temporary working directory for intermediate files.
     - plot_grid_cells: If True, plot the grid cells that fall within each basin. By default, the figures
     are saved in the `output_dir/figures` directory.
     """
@@ -54,8 +52,7 @@ def extract_livneh_lusu_data(basins_list,
     years = np.arange(years_start_end[0], years_start_end[1] + 1)
 
     # Open one of the Livneh-Lusu netCDF files to get grid
-    nc = Dataset(
-        livneh_lusu_dir + livneh_lusu_temp_file_template.format(years[0]), 'r')
+    nc = Dataset(livneh_lusu_dir + livneh_lusu_temp_file_template.format(years[0]), 'r')
 
     # Get the latitude and longitude variables from the Livneh-luse netCDF file
     latitudes = nc.variables['lat'][:]
@@ -63,13 +60,13 @@ def extract_livneh_lusu_data(basins_list,
     lon_grid, lat_grid = np.meshgrid(longitudes, latitudes)
 
     # Create a geodataframe for the Livneh-lusu grid cells
-    grid_cells = gpd.GeoDataFrame({'lon': lon_grid.flatten(), 'lat': lat_grid.flatten()}, geometry=None)
+    
     lat_res = np.diff(latitudes)[0] 
     lon_res = np.diff(longitudes)[0]
-    grid_cells['geometry'] = \
-        [create_gridcell_from_lat_lon(lon, lat, lon_res, lat_res) \
-        for lon, lat in zip(lon_grid.ravel(), lat_grid.ravel())]
-    grid_cells = grid_cells.set_geometry('geometry')
+    grid_cells = gpd.GeoDataFrame(
+        {'lon': lon_grid.flatten(), 'lat': lat_grid.flatten()}, 
+          geometry=[create_gridcell_from_lat_lon(lon, lat, lon_res, lat_res) \
+                    for lon, lat in zip(lon_grid.ravel(), lat_grid.ravel())])
     grid_cells.crs = 'EPSG:4326'  # Set the CRS to WGS84
     grid_cells_meters = grid_cells.to_crs(epsg=3857)  # Convert to Web Mercator for rasterization
 
@@ -84,6 +81,13 @@ def extract_livneh_lusu_data(basins_list,
                                     geometry=[basin['geometry']], 
                                     crs=basins_list.crs)
         watershed_meters = watershed.to_crs(epsg=3857)  # Convert to Web Mercator for rasterization
+
+        # Check if the geometry is valid
+        # This can happen if the basin geometry is invalid (e.g. self-intersecting)
+        # In this case, we buffer the geometry by 0 meters to make it valid
+        if not watershed_meters.is_valid.all():
+            watershed_meters["geometry"] = watershed_meters.geometry.buffer(0)
+
         intersecting_cells = grid_cells_meters[grid_cells_meters.intersects(watershed_meters.union_all())]
 
         intersecting_cells = intersecting_cells.copy()
@@ -218,14 +222,14 @@ if __name__ == '__main__':
     # Read the shapefile using geopandas
     basin_shapefile = gpd.read_file(basin_shapefile_file)
 
-    basin_chunks = np.array_split(basin_shapefile, num_processes)
+    split_indices = np.array_split(basin_shapefile.index, num_processes)
+
+    basin_chunks = [basin_shapefile.iloc[indices] for indices in split_indices]
 
     # Directory where the Livneh-Lusu data is stored (user needs to download the netCDF files))
     livneh_lusu_dir = '../data/Livneh_Lusu/' 
     # Directory where the output files will be saved 
     output_dir = '../data/Livneh_Lusu_extracted_data/' 
-
-    tmp_work_dir = '../temporary_working_dir/'
 
     params = [
         (
@@ -236,7 +240,6 @@ if __name__ == '__main__':
             'livneh_lusu_2020_temp_and_wind.2021-05-02.{}.nc', # Livneh-Lusu temperature and wind file template
             'livneh_unsplit_precip.2021-05-02.{}.nc', # Livneh-Lusu precipitation file template
             False,  # Overwrite flag
-            tmp_work_dir, # Temporary working directory
             True    # Plot grid cells flag
         )
         for basin_chunk in basin_chunks
