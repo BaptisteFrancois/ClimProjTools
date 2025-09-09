@@ -164,8 +164,8 @@ def extract_basin_average_from_CMIP6_data(variables, experiments, basin_shapefil
 
                 # Upon request, plot the grid cells and the basin
                 if create_plot_gcm_grid_cells:
-                    if not os.path.exists(f'../data/CMIP6/figures/GCM_grid/'):
-                        os.makedirs(f'../data/CMIP6/figures/GCM_grid/')
+                    if not os.path.exists(f'{output_directory}/figures/GCM_grid/'):
+                        os.makedirs(f'{output_directory}/figures/GCM_grid/')
                     fig, ax = plt.subplots()
                     grid_cells.to_crs(epsg=4326).boundary.plot(ax=plt.gca(), color='black')
                     basin.to_crs(epsg=4326).boundary.plot(ax=plt.gca(), color='red')
@@ -174,7 +174,7 @@ def extract_basin_average_from_CMIP6_data(variables, experiments, basin_shapefil
                     plt.title(f'{gcm_name} grid cells and basin', fontsize=16)
                     plt.tight_layout()
                     fig.savefig(
-                        f'../data/CMIP6/figures/GCM_grid/{gcm_name}_{var}_{exp}_grid_cells_and_basin.png')
+                        f'{output_directory}/figures/GCM_grid/{gcm_name}_{var}_{exp}_grid_cells_and_basin.png')
                     #plt.show()
                     plt.close()
                     
