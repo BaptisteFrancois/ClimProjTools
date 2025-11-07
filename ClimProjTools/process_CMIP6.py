@@ -144,6 +144,14 @@ def extract_basin_average_from_CMIP6_data(variables, experiments, basin_shapefil
                 grid_cells = gpd.GeoDataFrame({'lon': lon_grid.ravel(), 'lat': lat_grid.ravel(), 'geometry': None})
                 lat_steps = np.diff(dataset.lat.values)
                 lon_steps = np.diff(dataset.lon.values)
+
+                # If either lat_steps or lon_steps are empty, it means that the grid has only one row or one column
+                # In this case, we set a conservative value of 2.5 degrees (which is the typical coarse resolution of the GCMs)
+                if len(lat_steps) == 0:
+                    lat_steps = [2.5]
+                if len(lon_steps) == 0:
+                    lon_steps = [2.5]
+
                 if len(np.unique(lat_steps)) > 1 or len(np.unique(lon_steps)) > 1:
                     # The grid is not regular' -- we take the average of the steps. No perfect, but it will do
                     # especially since the difference is small given the resolution of the grid and the size of the basin
@@ -527,7 +535,7 @@ def random_sampling_from_copula(future_periods, experiment, path_deltaT, path_de
 
 
 def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_map=None, xlim=None,
-                      ylim=None, with_gcm_distribution_on_the_side=True, path_figure=None,
+                      ylim=None, unit_temperature='Celsius', with_gcm_distribution_on_the_side=True, path_figure=None,
                       figure_title=None):
     
     """
@@ -559,6 +567,10 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
         ylim: tuple (optional)
             The y-axis limits.
 
+        unit_temperature: str (optional)
+            The unit of temperature. Either 'Celsius', 'Fahrenheit', or 'Kelvin'. Default is 'Celsius'.
+            Note: The delta temperature values in the input file are assumed to be in Celsius.
+
         path_figure: str (optional)
             The path to save the figure. If None, the figure will be displayed.
 
@@ -580,6 +592,16 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
     deltaT = deltaT.loc[common_models]
     deltaP = deltaP.loc[common_models]
 
+    # Convert temperature units if needed
+    if unit_temperature.lower() == 'fahrenheit':
+        deltaT = deltaT * 9/5
+    elif unit_temperature.lower() == 'kelvin':
+        deltaT = deltaT + 273.15
+    elif unit_temperature.lower() == 'celsius':
+        pass
+    else:
+        raise ValueError("unit_temperature must be either 'Celsius', 'Fahrenheit', or 'Kelvin'")
+    
     # Set the colors
     if colors is not None:
         if len(colors) != len(deltaT.columns):
@@ -600,7 +622,13 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
             ax.scatter(deltaP[period], deltaT[period], s=120, c=colors[k], edgecolors='k', label=period,
                     zorder=2)
         ax.legend(fontsize=12)
-        ax.set_ylabel(r'$\Delta T\ (C)$', fontsize=14)
+        if unit_temperature.lower() == 'celsius':
+            ax.set_ylabel(r'$\Delta T\ (C)$', fontsize=14)
+        elif unit_temperature.lower() == 'fahrenheit':
+            ax.set_ylabel(r'$\Delta T\ (F)$', fontsize=14)
+        elif unit_temperature.lower() == 'kelvin':
+            ax.set_ylabel(r'$\Delta T\ (K)$', fontsize=14)
+
         ax.set_xlabel(r'$\Delta P\ (\%)$', fontsize=14)
         if figure_title is not None:
             ax.set_title(figure_title, fontsize=16)
@@ -614,6 +642,8 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
         ax.tick_params(axis='both', which='major', labelsize=12)
         plt.tight_layout()
         if path_figure is not None:
+            if os.path.exists(os.path.dirname(path_figure)) == False:
+                os.makedirs(os.path.dirname(path_figure))
             fig.savefig(path_figure)
             plt.close()
         else:
@@ -655,7 +685,13 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
             ax3.hist(deltaT[period].values.flatten(), bins=bins_T, color=colors[k], edgecolor='k', 
                      alpha=alpha[k], orientation='horizontal', label=period)
         ax1.legend(fontsize=12)
-        ax1.set_ylabel(r'$\Delta T\ (C)$', fontsize=14)
+        if unit_temperature.lower() == 'celsius':
+            ax1.set_ylabel(r'$\Delta T\ (C)$', fontsize=14)
+        elif unit_temperature.lower() == 'fahrenheit':
+            ax1.set_ylabel(r'$\Delta T\ (F)$', fontsize=14)
+        elif unit_temperature.lower() == 'kelvin':
+            ax1.set_ylabel(r'$\Delta T\ (K)$', fontsize=14)
+        
         ax1.set_xlabel(r'$\Delta P\ (\%)$', fontsize=14)
         ax1.grid(zorder=1)
         if xlim is not None:
@@ -681,6 +717,8 @@ def plot_delta_change(path_deltaT, path_deltaP, future_exp, colors=None, color_m
         plt.tight_layout()
         
         if path_figure is not None:
+            if os.path.exists(os.path.dirname(path_figure)) == False:
+                os.makedirs(os.path.dirname(path_figure))
             fig.savefig(path_figure)
             plt.close()
         else:
@@ -732,3 +770,4 @@ if '__main__' == __name__:
                     ylim=(0, 8),
                     figure_title='CMIP6 models (SSP5-8.5) across Orinoquia Basin',
                     )
+
