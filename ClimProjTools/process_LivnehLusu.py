@@ -1,6 +1,8 @@
 
 
 import os
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
 
 # Import required libraries
 import numpy as np
@@ -9,12 +11,13 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
 from ClimProjTools.utils import create_gridcell_from_lat_lon
+from shapely.geometry import Polygon
 
 import rasterio
 from rasterio.mask import mask
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
-
+import xarray as xr
 import multiprocessing as mp
 
 
@@ -65,15 +68,18 @@ def extract_livneh_lusu_data(basins_list,
     lon_res = np.diff(longitudes)[0]
     grid_cells = gpd.GeoDataFrame(
         {'lon': lon_grid.flatten(), 'lat': lat_grid.flatten()}, 
-          geometry=[create_gridcell_from_lat_lon(lon, lat, lon_res, lat_res) \
-                    for lon, lat in zip(lon_grid.ravel(), lat_grid.ravel())])
+            geometry=[create_gridcell_from_lat_lon(lon, lat, lon_res, lat_res) \
+                for lon, lat in zip(lon_grid.ravel(), lat_grid.ravel())])
     grid_cells.crs = 'EPSG:4326'  # Set the CRS to WGS84
     grid_cells_meters = grid_cells.to_crs(epsg=3857)  # Convert to Web Mercator for rasterization
 
+    print('basin_list:', basins_list)
+    print('basin_list type:', type(basins_list))
+    print('basin_list shape:', basins_list.shape)
 
     # Loop over the basins
     for index, basin in basins_list.iterrows():
-        
+        print(index, basin['hru_id'])
         # Get the basin ID and ensure it is zero-padded to 8 digits
         basin_id = str(basin['hru_id']).zfill(8)  # Ensure the basin ID is zero-padded to 8 digits
 
@@ -139,7 +145,7 @@ def extract_livneh_lusu_data(basins_list,
 
         # Loop over the years and extract the data for the grid cells
         for year in years:
-
+            print(f'  Extracting data for year {year}...')
             # Repeat the weight for each time step
             intersecting_cells['weights'] = intersecting_cells['weights'].values[:, np.newaxis]
             
@@ -177,13 +183,14 @@ def extract_livneh_lusu_data(basins_list,
                     # The overlapping grid cell is completely masked. We skip it and will discount its 
                     # contribution to the basin average.
                     # This typically happens when overlapping grid cells are located outside the domain
-                    # of the Livneh-Lusu dataset (e.g. in Canada).          
-                    area_discounted+= intersecting_cells['fraction_overlap'].values[i]
-                else:           
-                    tmax_.append(nc_temp.variables['Tmax'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
-                    tmin_.append(nc_temp.variables['Tmin'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
-                    wind_.append(nc_temp.variables['Wind'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
-                    prcp_.append(nc_precip.variables['PRCP'][:, y, x] * intersecting_cells['fraction_overlap'].values[i])
+                    # of the Livneh-Lusu dataset (e.g. in Canada).
+                    area_discounted += intersecting_cells['fraction_overlap'].values[i]
+                else:
+                    frac = intersecting_cells['fraction_overlap'].values[i].astype(np.float64)
+                    tmax_.append(nc_temp.variables['Tmax'][:, y, x].astype(np.float64) * frac)
+                    tmin_.append(nc_temp.variables['Tmin'][:, y, x].astype(np.float64) * frac)
+                    wind_.append(nc_temp.variables['Wind'][:, y, x].astype(np.float64) * frac)
+                    prcp_.append(nc_precip.variables['PRCP'][:, y, x].astype(np.float64) * frac)
 
             
             tmax = np.array(tmax_).sum(axis=0) / (intersecting_cells['fraction_overlap'].values.sum() - area_discounted)
@@ -231,6 +238,8 @@ if __name__ == '__main__':
     # Directory where the output files will be saved 
     output_dir = '../data/Livneh_Lusu_extracted_data/' 
 
+    print('basin_chunk', basin_chunks)
+
     params = [
         (
             basin_chunk,  # your specific basin (or list of basins) for this job
@@ -244,7 +253,21 @@ if __name__ == '__main__':
         )
         for basin_chunk in basin_chunks
     ]
-    
+
+    print('params:', params)
+    print('params type:', type(params))
+    print('params shape:', len(params))
+
+    print('params[0]:', params[0])
+    print('params[0] type:', type(params[0]))
+    print('params[0] shape:', len(params[0]))
+
+    print('params[0][0]:', params[0][0])
+    print('params[0][1]:', params[0][1])
+    print('params[0][2]:', params[0][2])
+    print('params[0][3]:', params[0][3])
+    print('params[0][4]:', params[0][4])
+    print('params[0][5]:', params[0][5])
 
     # extract the Livneh-Lusu data for each chunk in parallel
     mp.Pool(num_processes).starmap(extract_livneh_lusu_data, params)
